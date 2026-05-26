@@ -1,20 +1,28 @@
 import re
 import torch
 
+## TODO Training data generator based on our input data file
+## TODO Upgrade Dictionary support better word memroy management
 ## TODO data set to learn from
-## TODO Positional encoding or other modern approach
-## TODO mask
-## TODO tgt (second param in transformer(1,2)
-## TODO 
+## TODO Positional encoding or other modern approach sine/cosine / RoPE? / ALiBI
+## TODO      RoPE - for positional encodeing
+## TODO training model.train()
+## TODO Linear Out for our target token output size ( cnoverter to embedding )
+## TODO ✅ mask
+## TODO ✅ Dictionary Tokenizer
+## TODO ✅ Transformer ( self-attent / multi-heads )
+## TODO ✅ tgt (second param in transformer(1,2)
 ## TODO ✅ build Dictionary
 ## TODO ✅ Special tokens padding, end, start
+## TODO ✅ tgt (second param in transformer(1,2)
 
-training_data = 'Hello this is all the data'
+training_data = ['Hello this is all the data', 'and here is the rest']
 
-class Dictionary():
+class Dictionary(torch.nn.Module):
     def __init__(self, all_words):
+        super().__init__()
         self.norm = r'[^0-9a-z \-]'
-        self.word_list = set(self.normalize('pad ' + all_words).split())
+        self.word_list = set(self.normalize('pad ' + " ".join(all_words)).split())
         self.dictionary = {
             '<padding>' : 0,
             '<start_of_sequence>' : 1,
@@ -28,18 +36,18 @@ class Dictionary():
     def __len__(self):
         return len(self.dictionary)
 
+    def __repr__(self):
+        return str(self.dictionary)
+
     def normalize(self, words):
         return re.sub(self.norm, '', words.lower())
         
     def tokenize(self, words):
         tokens = [self.dictionary[word] for word in words.split()]
-        return torch.Tensor(tokens).to(torch.long) #, dtype=torch.long)
+        return torch.Tensor(tokens).to(torch.long)
 
 class Transformer(torch.nn.Module):
     def __init__(self, dictionary):
-        ## Dictionary Tokenizer
-        ## Transformer ( self-attent / multi-heads )
-        ## Linear Out for our target token output size ( cnoverter to embedding )
         super().__init__()
         self.dictionary = dictionary
         self.dims = dims = 128
@@ -55,23 +63,31 @@ class Transformer(torch.nn.Module):
             activation=torch.nn.GELU(),
             batch_first=True,
         )
+        self.linear = torch.nn.Linear(dims, len(dictionary))
 
-    def forward(self, words):
-        norm = self.dictionary.normalize(words)
-        tokens = self.dictionary.tokenize(norm)
-        embedding = self.embedding(tokens)
+    def forward(self, question, answer):
+        question_norm = self.dictionary.normalize(question)
+        answer_norm = self.dictionary.normalize(answer)
+
+        question_tokens = self.dictionary.tokenize(question_norm)
+        answer_tokens = self.dictionary.tokenize(answer_norm)
+
+        question_embedding = self.embedding(question_tokens)
+        answer_embedding = self.embedding(answer_tokens)
+
+        ## TODO Positional encoding  (RoPE) 
         ## TODO mask
-        ## TODO tgt (second param in transformer(1,2)
-        out = self.transformer(embedding, embedding) ## TODO < Target
+        question_mask = torch.nn.Transformer.generate_square_subsequent_mask(question_embedding.size(0))
+        answer_mask = torch.nn.Transformer.generate_square_subsequent_mask(answer_embedding.size(0))
+        out = self.transformer(question_embedding, answer_embedding, src_mask=question_mask, tgt_mask=answer_mask)
+        out = self.linear(out)
+        ## TODO LOGITS for token output
         return out
-        #return tokens
-        #return embedding
-
-#src = torch.rand((10, 32, 512))
-#tgt = torch.rand((20, 32, 512))
-#out = transformer_model(src, tgt)
 
 dictionary = Dictionary(training_data)
+print(dictionary)
 model = Transformer(dictionary)
-output = model(training_data)
+output = model(training_data[0], training_data[1])
 print(output)
+print(output.shape)
+print(torch.argmax(output, dim=1))
