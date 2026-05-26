@@ -29,15 +29,26 @@ class Dictionary(torch.nn.Module):
             '<end_of_sequence>' : 2,
         }
         self.dictionary.update({
-            word : index
+            word : index + len(self.dictionary)
             for index, word in enumerate(self.word_list)
         })
+        self.decoder = {
+            self.dictionary[k] : k
+            for k in self.dictionary.keys()
+        }
 
     def __len__(self):
         return len(self.dictionary)
 
     def __repr__(self):
         return str(self.dictionary)
+
+    def decode(self, tokens):
+        tokens = torch.argmax(output, dim=1)
+        #return tokens
+        #return self.decoder
+        words = [self.decoder[token.item()] for token in tokens]
+        return words
 
     def normalize(self, words):
         return re.sub(self.norm, '', words.lower())
@@ -90,4 +101,8 @@ model = Transformer(dictionary)
 output = model(training_data[0], training_data[1])
 print(output)
 print(output.shape)
-print(torch.argmax(output, dim=1))
+words = dictionary.decode(output)
+#print(" ".join(words))
+print(words)
+#print(words)
+#print(" ".join(words))
