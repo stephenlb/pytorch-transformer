@@ -6,8 +6,11 @@ import torch
 ## TODO data set to learn from
 ## TODO Positional encoding or other modern approach sine/cosine / RoPE? / ALiBI
 ## TODO      RoPE - for positional encodeing
+## TODO question_mask = torch.nn.Transformer.generate_square_subsequent_mask(question_embedding.size(0)) ## TODO size(1) if batching
+## TODO ✅ add <unk> token when word not in dictionary thank you @m_nizwa
 ## TODO training model.train()
-## TODO Linear Out for our target token output size ( cnoverter to embedding )
+## TODO ✅ Linear Out for our target token output size ( cnoverter to embedding )
+## TODO ✅ LOGITS for token output
 ## TODO ✅ mask
 ## TODO ✅ Dictionary Tokenizer
 ## TODO ✅ Transformer ( self-attent / multi-heads )
@@ -16,21 +19,24 @@ import torch
 ## TODO ✅ Special tokens padding, end, start
 ## TODO ✅ tgt (second param in transformer(1,2)
 
-training_data = ['Hello this is all the data', 'and here is the rest']
+training_data = ['Hello Kyle this is all the data <pad>', '<start> and here is the rest <end>']
 
 class Dictionary(torch.nn.Module):
     def __init__(self, all_words):
         super().__init__()
-        self.norm = r'[^0-9a-z \-]'
-        self.word_list = set(self.normalize('pad ' + " ".join(all_words)).split())
+        self.norm = r'[^0-9a-z \-<>]'
         self.dictionary = {
-            '<padding>' : 0,
-            '<start_of_sequence>' : 1,
-            '<end_of_sequence>' : 2,
+            '<pad>' : 0,
+            '<start>' : 1,
+            '<end>' : 2,
+            '<unk>' : 3,
         }
+        union_clip = set(self.dictionary.keys())
+        self.word_list = set(self.normalize(" ".join(all_words)).split()) - union_clip
         self.dictionary.update({
             word : index + len(self.dictionary)
             for index, word in enumerate(self.word_list)
+            #if not word in self.dictionary
         })
         self.decoder = {
             self.dictionary[k] : k
@@ -45,8 +51,6 @@ class Dictionary(torch.nn.Module):
 
     def decode(self, tokens):
         tokens = torch.argmax(output, dim=1)
-        #return tokens
-        #return self.decoder
         words = [self.decoder[token.item()] for token in tokens]
         return words
 
@@ -54,7 +58,10 @@ class Dictionary(torch.nn.Module):
         return re.sub(self.norm, '', words.lower())
         
     def tokenize(self, words):
-        tokens = [self.dictionary[word] for word in words.split()]
+        tokens = [
+            word in self.dictionary and self.dictionary[word] or self.dictionary['<unk>']
+            for word in words.split()
+        ]
         return torch.Tensor(tokens).to(torch.long)
 
 class Transformer(torch.nn.Module):
@@ -87,22 +94,22 @@ class Transformer(torch.nn.Module):
         answer_embedding = self.embedding(answer_tokens)
 
         ## TODO Positional encoding  (RoPE) 
-        ## TODO mask
-        question_mask = torch.nn.Transformer.generate_square_subsequent_mask(question_embedding.size(0))
+        question_mask = torch.nn.Transformer.generate_square_subsequent_mask(question_embedding.size(0)) ## TODO size(1) if batching
         answer_mask = torch.nn.Transformer.generate_square_subsequent_mask(answer_embedding.size(0))
         out = self.transformer(question_embedding, answer_embedding, src_mask=question_mask, tgt_mask=answer_mask)
         out = self.linear(out)
-        ## TODO LOGITS for token output
         return out
 
 dictionary = Dictionary(training_data)
 print(dictionary)
+print(dictionary.decoder)
 model = Transformer(dictionary)
 output = model(training_data[0], training_data[1])
+model.train()
 print(output)
 print(output.shape)
-words = dictionary.decode(output)
+#words = dictionary.decode(output)
 #print(" ".join(words))
-print(words)
+#print(words)
 #print(words)
 #print(" ".join(words))
