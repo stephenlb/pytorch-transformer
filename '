@@ -21,18 +21,6 @@ import torch
 
 training_data = ['Hello Kyle this is all the data <pad>', '<start> and here is the rest <end>']
 
-class SwiGLU(torch.nn.Module):
-    def __init__(self, in_features, hidden_features):
-        super().__init__()
-        # SwiGLU requires two parallel linear projections
-        self.w1 = torch.nn.Linear(in_features, hidden_features, bias=False)
-        self.w2 = torch.nn.Linear(in_features, hidden_features, bias=False)
-
-    def forward(self, x):
-        # Apply SiLU (Swish) to one path and multiply by the other
-        return torch.nn.functional.silu(self.w1(x)) * self.w2(x)
-
-
 class Dictionary(torch.nn.Module):
     def __init__(self, all_words):
         super().__init__()
@@ -90,8 +78,7 @@ class Transformer(torch.nn.Module):
             num_decoder_layers=4,
             dim_feedforward=dims,
             dropout=0.1,
-            #activation=torch.nn.GELU(),
-            activation=SwiGLU(dims, dims),
+            activation=torch.nn.GELU(),
             batch_first=True,
         )
         self.linear = torch.nn.Linear(dims, len(dictionary))
@@ -117,14 +104,11 @@ dictionary = Dictionary(training_data)
 print(dictionary)
 print(dictionary.decoder)
 model = Transformer(dictionary)
-optimizer = torch.optim.AdamW(model.parameters(), lr=0.0001)
-#criterion = torch.CrossEntropyLoss(ignore_index=0)
 output = model(training_data[0], training_data[1])
 model.train()
 print(output)
 print(output.shape)
 words = dictionary.decode(output)
-#loss = criterion(output, training_data[1]
 print(" ".join(words))
 #print(words)
 #print(words)
