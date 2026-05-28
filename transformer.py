@@ -5,9 +5,12 @@ import torch
 ## TODO Upgrade Dictionary support better word memroy management
 ## TODO data set to learn from
 ## TODO Positional encoding or other modern approach sine/cosine / RoPE? / ALiBI
+## TODO ignore_index=0) <-- restor ignore_index=0
+#
 ## TODO      RoPE - for positional encodeing
 ## TODO training model.train()
 ## TODO question_mask = torch.nn.Transformer.generate_square_subsequent_mask(question_embedding.size(0)) ## TODO size(1) if batching
+## TODO trim start and end between target and training_data[1]
 ## TODO ✅ add <unk> token when word not in dictionary thank you @m_nizwa
 ## TODO ✅ Linear Out for our target token output size ( cnoverter to embedding )
 ## TODO ✅ LOGITS for token output
@@ -18,7 +21,10 @@ import torch
 ## TODO ✅ tgt (second param in transformer(1,2)
 ## TODO ✅ Special tokens padding, end, start
 
-training_data = ['Hello Kyle this is all the data <pad>', '<start> and here is the rest <end>']
+training_data = [
+    'Hello Kyle this is all the data <pad>',
+    '<start> and here is the rest <end>'
+]
 
 class PositionalEncoding(torch.nn.Module):
     def __init__(self, dims):
@@ -82,7 +88,7 @@ class Dictionary(torch.nn.Module):
 
     def one_hot(self, words):
         tokens = self.tokenize(words)
-        return torch.nn.functional.one_hot(tokens)
+        return torch.nn.functional.one_hot(tokens)#.to(torch.float)
         
 class Transformer(torch.nn.Module):
     def __init__(self, dictionary):
@@ -103,6 +109,7 @@ class Transformer(torch.nn.Module):
             batch_first=True,
         )
         self.linear = torch.nn.Linear(dims, len(dictionary))
+        self.soft = torch.nn.Softmax()
 
     def forward(self, question, answer):
         question_tokens = self.dictionary.tokenize(question)
@@ -110,12 +117,14 @@ class Transformer(torch.nn.Module):
 
         question_embedding = self.embedding(question_tokens)
         answer_embedding = self.embedding(answer_tokens)
+        print('labels:',answer_embedding)
 
         ## TODO Positional encoding  (RoPE) 
         question_mask = torch.nn.Transformer.generate_square_subsequent_mask(question_embedding.size(0)) ## TODO size(1) if batching
         answer_mask = torch.nn.Transformer.generate_square_subsequent_mask(answer_embedding.size(0))
         out = self.transformer(question_embedding, answer_embedding, src_mask=question_mask, tgt_mask=answer_mask)
         out = self.linear(out)
+        out = self.soft(out)
         return out
 
 dictionary = Dictionary(training_data)
@@ -123,19 +132,27 @@ print(dictionary)
 print(dictionary.decoder)
 model = Transformer(dictionary)
 model.train()
-optimizer = torch.optim.AdamW(model.parameters(), lr=0.0001)
+optimizer = torch.optim.AdamW(model.parameters(), lr=0.01)
 criterion = torch.nn.CrossEntropyLoss(ignore_index=0)
 epochs = 1
 for epoch in range(epochs):
     print(epoch)
     output = model(training_data[0], training_data[1])
     print(output)
-    print(output.shape)
+    print('output.shape', output.shape)
     #words = dictionary.decode(output)
-    targets = dictionary.one_hot(training_data[1])
+    ## TODO trim start and end between target and training_data[1]
+    #targets = dictionary.one_hot(training_data[1])
+    targets = dictionary.tokenize(training_data[1])
     print('targets', targets)
- 
-    #loss = criterion(output, training_data[1])
+    print('targets', targets.shape)
+    #print('targets', targets)
+    #loss = criterion(output, targets)
+    #loss = -torch.log(output)[targets].mean()
+    ##loss = torch.log(output)
+    #(-log(p))[correct].sum()
+    #print('loss',loss)
+    #loss.backward()
     #print(" ".join(words))
 #print(words)
 #print(words)
