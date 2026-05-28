@@ -70,7 +70,7 @@ class Dictionary(torch.nn.Module):
     def __repr__(self):
         return str(self.dictionary)
 
-    def decode(self, tokens):
+    def decode(self, output):
         tokens = torch.argmax(output, dim=1)
         words = [self.decoder[token.item()] for token in tokens]
         return words
@@ -117,14 +117,13 @@ class Transformer(torch.nn.Module):
 
         question_embedding = self.embedding(question_tokens)
         answer_embedding = self.embedding(answer_tokens)
-        print('labels:',answer_embedding)
 
         ## TODO Positional encoding  (RoPE) 
         question_mask = torch.nn.Transformer.generate_square_subsequent_mask(question_embedding.size(0)) ## TODO size(1) if batching
         answer_mask = torch.nn.Transformer.generate_square_subsequent_mask(answer_embedding.size(0))
         out = self.transformer(question_embedding, answer_embedding, src_mask=question_mask, tgt_mask=answer_mask)
         out = self.linear(out)
-        out = self.soft(out)
+        #out = self.soft(out)
         return out
 
 dictionary = Dictionary(training_data)
@@ -132,28 +131,30 @@ print(dictionary)
 print(dictionary.decoder)
 model = Transformer(dictionary)
 model.train()
-optimizer = torch.optim.AdamW(model.parameters(), lr=0.01)
+optimizer = torch.optim.AdamW(model.parameters(), lr=0.0001)
 criterion = torch.nn.CrossEntropyLoss(ignore_index=0)
-epochs = 1
+epochs = 100
 for epoch in range(epochs):
-    print(epoch)
+    #print(epoch)
     output = model(training_data[0], training_data[1])
-    print(output)
-    print('output.shape', output.shape)
-    #words = dictionary.decode(output)
+    #print(output)
+    #rint('output.shape', output.shape)
     ## TODO trim start and end between target and training_data[1]
     #targets = dictionary.one_hot(training_data[1])
     targets = dictionary.tokenize(training_data[1])
-    print('targets', targets)
-    print('targets', targets.shape)
+    #rint('targets', targets)
+    #rint('targets', targets.shape)
     #print('targets', targets)
-    #loss = criterion(output, targets)
-    #loss = -torch.log(output)[targets].mean()
+    loss = criterion(output, targets)
+    #loss = -torch.log(output)[targets].sum()
     ##loss = torch.log(output)
     #(-log(p))[correct].sum()
-    #print('loss',loss)
-    #loss.backward()
-    #print(" ".join(words))
+    print('loss',loss)
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+    words = dictionary.decode(output)
+    print(" ".join(words))
 #print(words)
 #print(words)
 #print(" ".join(words))
