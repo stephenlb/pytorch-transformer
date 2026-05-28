@@ -6,20 +6,23 @@ import torch
 ## TODO data set to learn from
 ## TODO Positional encoding or other modern approach sine/cosine / RoPE? / ALiBI
 ## TODO      RoPE - for positional encodeing
+## TODO training model.train()
 ## TODO question_mask = torch.nn.Transformer.generate_square_subsequent_mask(question_embedding.size(0)) ## TODO size(1) if batching
 ## TODO ✅ add <unk> token when word not in dictionary thank you @m_nizwa
-## TODO training model.train()
 ## TODO ✅ Linear Out for our target token output size ( cnoverter to embedding )
 ## TODO ✅ LOGITS for token output
 ## TODO ✅ mask
 ## TODO ✅ Dictionary Tokenizer
+## TODO ✅ build Dictionary
 ## TODO ✅ Transformer ( self-attent / multi-heads )
 ## TODO ✅ tgt (second param in transformer(1,2)
-## TODO ✅ build Dictionary
 ## TODO ✅ Special tokens padding, end, start
-## TODO ✅ tgt (second param in transformer(1,2)
 
 training_data = ['Hello Kyle this is all the data <pad>', '<start> and here is the rest <end>']
+
+class PositionalEncoding(torch.nn.Module):
+    def __init__(self, dims):
+        pass
 
 class SwiGLU(torch.nn.Module):
     def __init__(self, in_features, hidden_features):
@@ -70,12 +73,17 @@ class Dictionary(torch.nn.Module):
         return re.sub(self.norm, '', words.lower())
         
     def tokenize(self, words):
+        words = self.normalize(words)
         tokens = [
             word in self.dictionary and self.dictionary[word] or self.dictionary['<unk>']
             for word in words.split()
         ]
         return torch.Tensor(tokens).to(torch.long)
 
+    def one_hot(self, words):
+        tokens = self.tokenize(words)
+        return torch.nn.functional.one_hot(tokens)
+        
 class Transformer(torch.nn.Module):
     def __init__(self, dictionary):
         super().__init__()
@@ -97,11 +105,8 @@ class Transformer(torch.nn.Module):
         self.linear = torch.nn.Linear(dims, len(dictionary))
 
     def forward(self, question, answer):
-        question_norm = self.dictionary.normalize(question)
-        answer_norm = self.dictionary.normalize(answer)
-
-        question_tokens = self.dictionary.tokenize(question_norm)
-        answer_tokens = self.dictionary.tokenize(answer_norm)
+        question_tokens = self.dictionary.tokenize(question)
+        answer_tokens = self.dictionary.tokenize(answer)
 
         question_embedding = self.embedding(question_tokens)
         answer_embedding = self.embedding(answer_tokens)
@@ -117,15 +122,21 @@ dictionary = Dictionary(training_data)
 print(dictionary)
 print(dictionary.decoder)
 model = Transformer(dictionary)
-optimizer = torch.optim.AdamW(model.parameters(), lr=0.0001)
-#criterion = torch.CrossEntropyLoss(ignore_index=0)
-output = model(training_data[0], training_data[1])
 model.train()
-print(output)
-print(output.shape)
-words = dictionary.decode(output)
-#loss = criterion(output, training_data[1]
-print(" ".join(words))
+optimizer = torch.optim.AdamW(model.parameters(), lr=0.0001)
+criterion = torch.nn.CrossEntropyLoss(ignore_index=0)
+epochs = 1
+for epoch in range(epochs):
+    print(epoch)
+    output = model(training_data[0], training_data[1])
+    print(output)
+    print(output.shape)
+    #words = dictionary.decode(output)
+    targets = dictionary.one_hot(training_data[1])
+    print('targets', targets)
+ 
+    #loss = criterion(output, training_data[1])
+    #print(" ".join(words))
 #print(words)
 #print(words)
 #print(" ".join(words))
