@@ -1,16 +1,30 @@
 import re
 import torch
 
+def generate_math():
+    data = []
+    for i in range(100):
+        question = f'{i}+{i}='
+        answer = f'{i+i}'
+        data.append([f'{question:p<10}', f'{answer:p<10}'])
+    return data
+
+## 10 + 30 = 40
+## TODO MATH GPT
+## TODO Train on Math problems! Math GPT
+## TODO Batching
+## TODO Positional encoding or other modern approach sine/cosine / RoPE? / ALiBI
+## TODO ML Ops `mlops`
+
 ## TODO Training data generator based on our input data file
 ## TODO Upgrade Dictionary support better word memroy management
 ## TODO data set to learn from
-## TODO Positional encoding or other modern approach sine/cosine / RoPE? / ALiBI
-## TODO ignore_index=0) <-- restor ignore_index=0
-#
 ## TODO      RoPE - for positional encodeing
 ## TODO training model.train()
 ## TODO question_mask = torch.nn.Transformer.generate_square_subsequent_mask(question_embedding.size(0)) ## TODO size(1) if batching
 ## TODO trim start and end between target and training_data[1]
+
+## TODO ✅ ignore_index=0) <-- restor ignore_index=0
 ## TODO ✅ add <unk> token when word not in dictionary thank you @m_nizwa
 ## TODO ✅ Linear Out for our target token output size ( cnoverter to embedding )
 ## TODO ✅ LOGITS for token output
@@ -21,10 +35,10 @@ import torch
 ## TODO ✅ tgt (second param in transformer(1,2)
 ## TODO ✅ Special tokens padding, end, start
 
-training_data = [
-    'Hello Kyle this is all the data <pad>',
-    '<start> and here is the rest <end>'
-]
+#training_data = [
+#    ['Hello Kyle this is all the data <pad>',
+#    '<start> and here is the rest <end>']
+#]
 
 class PositionalEncoding(torch.nn.Module):
     def __init__(self, dims):
@@ -43,17 +57,18 @@ class SwiGLU(torch.nn.Module):
 
 
 class Dictionary(torch.nn.Module):
-    def __init__(self, all_words):
+    def __init__(self, data):
         super().__init__()
-        self.norm = r'[^0-9a-z \-<>]'
+        self.norm = r'[^0-9a-z \-=+]'
         self.dictionary = {
-            '<pad>' : 0,
-            '<start>' : 1,
-            '<end>' : 2,
-            '<unk>' : 3,
+            'p' : 0, ## Padding
+            's' : 1, ## Start of Sequence
+            'e' : 2, ## End of Sequence
+            'u' : 3, ## Unknown Token
         }
         union_clip = set(self.dictionary.keys())
-        self.word_list = set(self.normalize(" ".join(all_words)).split()) - union_clip
+        all_words = " ".join([" ".join(phrase) for phrase in data])
+        self.word_list = set(list(self.normalize(" ".join(all_words)))) - union_clip
         self.dictionary.update({
             word : index + len(self.dictionary)
             for index, word in enumerate(self.word_list)
@@ -78,11 +93,11 @@ class Dictionary(torch.nn.Module):
     def normalize(self, words):
         return re.sub(self.norm, '', words.lower())
         
-    def tokenize(self, words):
-        words = self.normalize(words)
+    def tokenize(self, batches):
         tokens = [
-            word in self.dictionary and self.dictionary[word] or self.dictionary['<unk>']
-            for word in words.split()
+            [self.dictionary[char]
+            for char in list(self.normalize(exp))]
+            for exp in batches
         ]
         return torch.Tensor(tokens).to(torch.long)
 
@@ -104,8 +119,8 @@ class Transformer(torch.nn.Module):
             num_decoder_layers=4,
             dim_feedforward=dims,
             dropout=0.1,
-            #activation=torch.nn.GELU(),
-            activation=SwiGLU(dims, dims),
+            activation=torch.nn.GELU(),
+            #activation=SwiGLU(dims, dims),
             batch_first=True,
         )
         self.linear = torch.nn.Linear(dims, len(dictionary))
@@ -119,13 +134,14 @@ class Transformer(torch.nn.Module):
         answer_embedding = self.embedding(answer_tokens)
 
         ## TODO Positional encoding  (RoPE) 
-        question_mask = torch.nn.Transformer.generate_square_subsequent_mask(question_embedding.size(0)) ## TODO size(1) if batching
+        #question_mask = torch.nn.Transformer.generate_square_subsequent_mask(question_embedding.size(0)) ## TODO size(1) if batching
         answer_mask = torch.nn.Transformer.generate_square_subsequent_mask(answer_embedding.size(0))
-        out = self.transformer(question_embedding, answer_embedding, src_mask=question_mask, tgt_mask=answer_mask)
+        out = self.transformer(question_embedding, answer_embedding, tgt_mask=answer_mask)
         out = self.linear(out)
         #out = self.soft(out)
         return out
 
+training_data = generate_math()
 dictionary = Dictionary(training_data)
 print(dictionary)
 print(dictionary.decoder)
@@ -133,28 +149,39 @@ model = Transformer(dictionary)
 model.train()
 optimizer = torch.optim.AdamW(model.parameters(), lr=0.0001)
 criterion = torch.nn.CrossEntropyLoss(ignore_index=0)
-epochs = 100
+epochs = 10
+batches = 10
+batch_size = 10
 for epoch in range(epochs):
-    #print(epoch)
-    output = model(training_data[0], training_data[1])
-    #print(output)
-    #rint('output.shape', output.shape)
-    ## TODO trim start and end between target and training_data[1]
-    #targets = dictionary.one_hot(training_data[1])
-    targets = dictionary.tokenize(training_data[1])
-    #rint('targets', targets)
-    #rint('targets', targets.shape)
-    #print('targets', targets)
-    loss = criterion(output, targets)
-    #loss = -torch.log(output)[targets].sum()
-    ##loss = torch.log(output)
-    #(-log(p))[correct].sum()
-    print('loss',loss)
-    optimizer.zero_grad()
-    loss.backward()
-    optimizer.step()
-    words = dictionary.decode(output)
-    print(" ".join(words))
+    for batch in range(batches):
+        indexes = torch.randperm(50) + torch.randperm(50)
+        ## TODO pre tokenize training data!!
+        ## TODO pre tokenize training data!!
+        ## TODO pre tokenize training data!!
+        ## TODO pre tokenize training data!!
+        features = [a[0] for a in training_data[indexes]]
+        labels = [a[1] for a in training_data[indexes]]
+        #print(epoch)
+        output = model(features, labels)
+        #print(output)
+        #rint('output.shape', output.shape)
+        ## TODO trim start and end between target and training_data[1]
+        #targets = dictionary.one_hot(training_data[1])
+        #print('targets', targets)
+        #print('targets', targets.shape)
+        #print('output', output)
+        #print('output', output.shape)
+        targets = dictionary.tokenize(labels).reshape(-1)
+        loss = criterion(output.reshape(-1, len(dictionary)), targets)
+        #loss = -torch.log(output)[targets].sum()
+        ##loss = torch.log(output)
+        #(-log(p))[correct].sum()
+        print('loss',loss)
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+        #words = dictionary.decode(output)
+        #print(" ".join(words))
 #print(words)
 #print(words)
 #print(" ".join(words))
