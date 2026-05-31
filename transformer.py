@@ -1,12 +1,20 @@
 import re
 import torch
 
+
+### TODO Train on big data
+### TODO Train on Math teach basic 
+### TODO Finish Batch and Shuffling
+### TODO POSITIONAL Encoding
+### TODO ML FLOW
+
 def generate_math():
     data = []
     for i in range(100):
         question = f'{i}+{i}='
         answer = f'{i+i}'
-        data.append([f'{question:p<10}', f'{answer:p<10}'])
+        data.append([f'{question:p<10}', f'{answer:p<4}'])
+        #data.append([f'{question}', f'{answer}'])
     return data
 
 ## 10 + 30 = 40
@@ -41,8 +49,17 @@ def generate_math():
 #]
 
 class PositionalEncoding(torch.nn.Module):
-    def __init__(self, dims):
-        pass
+    def __init__(self, dims, max_tokens=5000):
+        super().__init__()
+        pe = []
+        for token in range(max_tokens):
+            if token % 2: pe.append(torch.sin(torch.linspace(0, max_tokens-token+1, dims)))
+            else:         pe.append(torch.cos(torch.linspace(0, max_tokens-token+1, dims)))
+        pe = torch.concat(pe).reshape(max_tokens, dims)
+        self.register_buffer("pe", pe)
+
+    def forward(self, x):
+        return x + self.pe[:x.shape[0],:]
 
 class SwiGLU(torch.nn.Module):
     def __init__(self, in_features, hidden_features):
@@ -85,10 +102,12 @@ class Dictionary(torch.nn.Module):
     def __repr__(self):
         return str(self.dictionary)
 
-    def decode(self, output):
-        tokens = torch.argmax(output, dim=1)
-        words = [self.decoder[token.item()] for token in tokens]
-        return words
+    def decode(self, outputs):
+        batch = []
+        for output in outputs:
+            tokens = torch.argmax(output, dim=1)
+            batch.append([self.decoder[token.item()] for token in tokens])
+        return batch
 
     def normalize(self, words):
         return re.sub(self.norm, '', words.lower())
@@ -112,6 +131,7 @@ class Transformer(torch.nn.Module):
         self.dims = dims = 128
         self.number_of_words = number_of_words = len(dictionary)
         self.embedding = torch.nn.Embedding(number_of_words, dims)
+        self.positional = PositionalEncoding(dims)
         self.transformer = torch.nn.Transformer(
             d_model=dims,
             nhead=4,
@@ -133,9 +153,11 @@ class Transformer(torch.nn.Module):
         question_embedding = self.embedding(question_tokens)
         answer_embedding = self.embedding(answer_tokens)
 
+        question_embedding = self.positional(question_embedding)
+
         ## TODO Positional encoding  (RoPE) 
         #question_mask = torch.nn.Transformer.generate_square_subsequent_mask(question_embedding.size(0)) ## TODO size(1) if batching
-        answer_mask = torch.nn.Transformer.generate_square_subsequent_mask(answer_embedding.size(0))
+        answer_mask = torch.nn.Transformer.generate_square_subsequent_mask(answer_embedding.size(1))
         out = self.transformer(question_embedding, answer_embedding, tgt_mask=answer_mask)
         out = self.linear(out)
         #out = self.soft(out)
@@ -149,39 +171,32 @@ model = Transformer(dictionary)
 model.train()
 optimizer = torch.optim.AdamW(model.parameters(), lr=0.0001)
 criterion = torch.nn.CrossEntropyLoss(ignore_index=0)
-epochs = 10
+epochs = 100
 batches = 10
 batch_size = 10
+training_data_len = len(training_data)
+def get_batch():
+    indexes = torch.randint(0, training_data_len, (batch_size,))
+    features, shifted, outputs = [], [], []
+    for index in range(batch_size):
+        sample = training_data[indexes[index]]
+        features.append(sample[0])
+        shifted.append(sample[1][:-1])
+        outputs.append(sample[1][1:])
+    return features, shifted, outputs
+
 for epoch in range(epochs):
     for batch in range(batches):
-        indexes = torch.randperm(50) + torch.randperm(50)
-        ## TODO pre tokenize training data!!
-        ## TODO pre tokenize training data!!
-        ## TODO pre tokenize training data!!
-        ## TODO pre tokenize training data!!
-        features = [a[0] for a in training_data[indexes]]
-        labels = [a[1] for a in training_data[indexes]]
-        #print(epoch)
-        output = model(features, labels)
-        #print(output)
-        #rint('output.shape', output.shape)
-        ## TODO trim start and end between target and training_data[1]
-        #targets = dictionary.one_hot(training_data[1])
-        #print('targets', targets)
-        #print('targets', targets.shape)
-        #print('output', output)
-        #print('output', output.shape)
-        targets = dictionary.tokenize(labels).reshape(-1)
+        features, shifted, target = get_batch()
+        output = model(features, shifted)
+        targets = dictionary.tokenize(target).reshape(-1)
         loss = criterion(output.reshape(-1, len(dictionary)), targets)
-        #loss = -torch.log(output)[targets].sum()
-        ##loss = torch.log(output)
-        #(-log(p))[correct].sum()
         print('loss',loss)
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-        #words = dictionary.decode(output)
-        #print(" ".join(words))
+    words = dictionary.decode(output)
+    print(words)
 #print(words)
 #print(words)
 #print(" ".join(words))
