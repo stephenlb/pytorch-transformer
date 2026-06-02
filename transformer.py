@@ -8,6 +8,32 @@ import torch
 ### TODO POSITIONAL Encoding
 ### TODO ML FLOW
 
+## Custom Stephen Transformer
+class StephenFormer(torch.nn.Module):
+    ## TODO KV Cache - good for inference
+    ## TODO Multi-head
+    ## TODO 
+    ## TODO 
+    ## TODO 
+    def __init__(self, dictionary, dims=128):
+        super().__init__()
+        self.dictionary = dictionary
+        self.dims = dims
+        self.query_projection = torch.nn.Linear(dims, dims)
+        self.key_projection   = torch.nn.Linear(dims, dims)
+        self.value_projection = torch.nn.Linear(dims, dims)
+        self.output_projection = torch.nn.Linear(dims, len(dictionary))
+        self.dropout = torch.nn.Dropout(0.1)
+
+    def attention(self, query, key, value):
+        ## skale query and key before matmult @
+        out = torch.nn.functional.softmax(query @ key) / torch.sqrt(self.dims)
+        pass
+
+    def forward(self, inputs):
+        pass
+
+
 def generate_math():
     data = []
     for i in range(100):
