@@ -12,25 +12,47 @@ import torch
 class StephenFormer(torch.nn.Module):
     ## TODO KV Cache - good for inference
     ## TODO Multi-head
+    ## TODO Attention
+    ## TODO Forward MLP with activation (GELU)
     ## TODO 
-    ## TODO 
-    ## TODO 
-    def __init__(self, dictionary, dims=128):
+    def __init__(self, dictionary, dims=128, heads=1):
         super().__init__()
         self.dictionary = dictionary
         self.dims = dims
+        self.heads = heads
+
+        ## Embedding
+        self.embedding = torch.rand(self.number_of_words, 64, requires_grad=True) - 0.5
+
+        ## Self Attention
         self.query_projection = torch.nn.Linear(dims, dims)
         self.key_projection   = torch.nn.Linear(dims, dims)
         self.value_projection = torch.nn.Linear(dims, dims)
+        self.softmax = torch.nn.Softmax()
+
+        ## Feed Forward
+        self.feedforward = torch.nn.Sequential(
+            torch.nn.Linear(dims, dims * 4),
+            torch.nn.GELU(),
+            torch.nn.Linear(dims * 4, dims),
+            torch.nn.Dropout(0.1),
+        )
+
+        ## Output Projection
         self.output_projection = torch.nn.Linear(dims, len(dictionary))
-        self.dropout = torch.nn.Dropout(0.1)
 
     def attention(self, query, key, value):
         ## skale query and key before matmult @
-        out = torch.nn.functional.softmax(query @ key) / torch.sqrt(self.dims)
-        pass
+        ## TODO attention Mask
+        #out = mask(query @ key.T)
+        out = self.softmax(query @ key.T) / torch.sqrt(self.dims)
+        out = out @ value
+        return out
 
     def forward(self, inputs):
+        query = self.query_projection(inputs)
+        key = self.key_projection(inputs)
+        value = self.value_projection(inputs)
         pass
 
 
