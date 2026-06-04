@@ -1,5 +1,6 @@
 import re
 import torch
+from pathlib import Path
 
 ### TODO Dictionary must tokenize better!!!!
 ### TODO Train on this file specificly
@@ -29,6 +30,7 @@ class StephenFormer(torch.nn.Module):
         self.key_projection   = torch.nn.Linear(dims, dims)
         self.value_projection = torch.nn.Linear(dims, dims)
         self.softmax = torch.nn.Softmax()
+        self.dropout = torch.nn.Dropout(0.1)
 
         ## Feed Forward
         self.feedforward = torch.nn.Sequential(
@@ -38,16 +40,16 @@ class StephenFormer(torch.nn.Module):
             torch.nn.Dropout(0.1),
         )
 
+        ## Layer Norm and Add
+        self.norm = torch.nn.LayerNorm(dims)
+
         ## Output Projection
         self.output_projection = torch.nn.Linear(dims, len(dictionary))
 
     def attention(self, query, key, value):
-        ## skale query and key before matmult @
-        ## Multi-headed attention
-        mask = torch.nn.Transformer.generate_square_subsequent_mask(query.size(1))
-        return query
-        out = (query @ key) / torch.sqrt(torch.tensor(self.dims)) ## @Cloudhead- - performance consideration - math.sqrt(dims) vs tensor
-        out = mask(out)
+        ## TODO Multi-headed attention
+        out = query @ key.transpose(1,2)
+        out = out / torch.sqrt(torch.tensor(self.dims))
         out = self.softmax(out)
         out = self.dropout(out)
         out = out @ value
@@ -57,29 +59,16 @@ class StephenFormer(torch.nn.Module):
         ## TODO @Cloudhead- use a single projection x 3 for faster better
         ##  Q,K,V=self.qkv(input).chunk(3,dim=-1)
         query = self.query_projection(inputs)
-        key = self.key_projection(inputs)
+        key   = self.key_projection(inputs)
         value = self.value_projection(inputs)
         out = self.attention(query, key, value)
+        out = self.norm(inputs + out)
         out = self.feedforward(out)
+        out = self.norm(inputs + out)
         out = self.output_projection(out)
         out = self.softmax(out)
         return out
 
-def generate_math():
-    data = []
-    for i in range(100):
-        question = f'{i}+{i}='
-        answer = f'{i+i}'
-        data.append([f'{question:p<10}', f'{answer:p<4}'])
-        #data.append([f'{question}', f'{answer}'])
-    return data
-
-## 10 + 30 = 40
-## TODO MATH GPT
-## TODO Train on Math problems! Math GPT
-## TODO Batching
-## TODO Positional encoding or other modern approach sine/cosine / RoPE? / ALiBI
-## TODO ML Ops `mlops`
 
 ## TODO Training data generator based on our input data file
 ## TODO Upgrade Dictionary support better word memroy management
@@ -88,22 +77,6 @@ def generate_math():
 ## TODO training model.train()
 ## TODO question_mask = torch.nn.Transformer.generate_square_subsequent_mask(question_embedding.size(0)) ## TODO size(1) if batching
 ## TODO trim start and end between target and training_data[1]
-
-## TODO ✅ ignore_index=0) <-- restor ignore_index=0
-## TODO ✅ add <unk> token when word not in dictionary thank you @m_nizwa
-## TODO ✅ Linear Out for our target token output size ( cnoverter to embedding )
-## TODO ✅ LOGITS for token output
-## TODO ✅ mask
-## TODO ✅ Dictionary Tokenizer
-## TODO ✅ build Dictionary
-## TODO ✅ Transformer ( self-attent / multi-heads )
-## TODO ✅ tgt (second param in transformer(1,2)
-## TODO ✅ Special tokens padding, end, start
-
-#training_data = [
-#    ['Hello Kyle this is all the data <pad>',
-#    '<start> and here is the rest <end>']
-#]
 
 class PositionalEncoding(torch.nn.Module):
     def __init__(self, dims, max_tokens=5000):
@@ -118,37 +91,22 @@ class PositionalEncoding(torch.nn.Module):
     def forward(self, x):
         return x + self.pe[:x.shape[0],:]
 
-class SwiGLU(torch.nn.Module):
-    def __init__(self, in_features, hidden_features):
-        super().__init__()
-        # SwiGLU requires two parallel linear projections
-        self.w1 = torch.nn.Linear(in_features, hidden_features, bias=False)
-        self.w2 = torch.nn.Linear(in_features, hidden_features, bias=False)
-
-    def forward(self, x):
-        # Apply SiLU (Swish) to one path and multiply by the other
-        return torch.nn.functional.silu(self.w1(x)) * self.w2(x)
-
-
-## TODO re-think the tokenizer
 class Dictionary(torch.nn.Module):
-    def __init__(self, data):
+    def __init__(self, corpus):
         super().__init__()
-        self.norm = r'[^0-9a-z \-=+]'
-        ## TODO do later for coding
+        ### TODO We are eating the newline chars......
+        self.norm = r'#.*$'
         self.dictionary = {
-            'p' : 0, ## Padding
-            's' : 1, ## Start of Sequence
-            'e' : 2, ## End of Sequence
-            'u' : 3, ## Unknown Token
+            #'<pad>' : 0, ## Padding
+            #'<start>' : 1, ## Start of Sequence
+            #'<end>' : 2, ## End of Sequence
+            #'<unknown>' : 3, ## Unknown Token
         }
         union_clip = set(self.dictionary.keys())
-        all_words = " ".join([" ".join(phrase) for phrase in data])
-        self.word_list = set(list(self.normalize(" ".join(all_words)))) - union_clip
+        self.vocab = set(self.normalize(corpus)) - union_clip
         self.dictionary.update({
             word : index + len(self.dictionary)
-            for index, word in enumerate(self.word_list)
-            #if not word in self.dictionary
+            for index, word in enumerate(self.vocab)
         })
         self.decoder = {
             self.dictionary[k] : k
@@ -169,19 +127,17 @@ class Dictionary(torch.nn.Module):
         return batch
 
     def normalize(self, words):
-        return re.sub(self.norm, '', words.lower())
+        return list(words)
+        #return re.sub(self.norm, '', words.lower())
+        #return words
         
     def tokenize(self, batches):
         tokens = [
-            [self.dictionary[char]
-            for char in list(self.normalize(exp))]
-            for exp in batches
+            [self.dictionary[words]
+                for words in self.normalize(phrases)
+            ] for phrases in batches
         ]
         return torch.Tensor(tokens).to(torch.long)
-
-    def one_hot(self, words):
-        tokens = self.tokenize(words)
-        return torch.nn.functional.one_hot(tokens)#.to(torch.float)
         
 class Transformer(torch.nn.Module):
     def __init__(self, dictionary):
@@ -192,18 +148,6 @@ class Transformer(torch.nn.Module):
         self.embedding = torch.nn.Embedding(number_of_words, dims)
         self.positional = PositionalEncoding(dims)
         self.stephen_transformer = StephenFormer(dictionary, dims=dims)
-        def nothing():
-            self.transformer = torch.nn.Transformer(
-                d_model=dims,
-                nhead=4,
-                num_encoder_layers=4,
-                num_decoder_layers=4,
-                dim_feedforward=dims,
-                dropout=0.1,
-                activation=torch.nn.GELU(),
-                #activation=SwiGLU(dims, dims),
-                batch_first=True,
-            )
         #self.linear = torch.nn.Linear(dims, len(dictionary))
         #self.soft = torch.nn.Softmax()
 
@@ -215,47 +159,24 @@ class Transformer(torch.nn.Module):
         out = self.stephen_transformer(pos_encoded)
         return out
 
-    def OLDforward(self, question, answer):
-        question_tokens = self.dictionary.tokenize(question)
-        answer_tokens = self.dictionary.tokenize(answer)
-
-        question_embedding = self.embedding(question_tokens)
-        answer_embedding = self.embedding(answer_tokens)
-
-        question_embedding = self.positional(question_embedding)
-
-        ## TODO Positional encoding  (RoPE) 
-        #question_mask = torch.nn.Transformer.generate_square_subsequent_mask(question_embedding.size(0)) ## TODO size(1) if batching
-        answer_mask = torch.nn.Transformer.generate_square_subsequent_mask(answer_embedding.size(1))
-        out = self.transformer(question_embedding, answer_embedding, tgt_mask=answer_mask)
-        out = self.linear(out)
-        #out = self.soft(out)
-        return out
-
-training_data = generate_math()
+## Read self so we can learn self, and replicate
+training_data = Path(__file__).read_text()
+#training_data = generate_math()
 dictionary = Dictionary(training_data)
 print(dictionary)
 print(dictionary.decoder)
-model = Transformer(dictionary)
-model.train()
-optimizer = torch.optim.AdamW(model.parameters(), lr=0.0001)
-criterion = torch.nn.CrossEntropyLoss(ignore_index=0)
-epochs = 100
-batches = 10
-batch_size = 10
-training_data_len = len(training_data)
+def nonaksjfask():
+    model = Transformer(dictionary)
+    model.train()
+    optimizer = torch.optim.AdamW(model.parameters(), lr=0.0001)
+    criterion = torch.nn.CrossEntropyLoss(ignore_index=0)
+    epochs = 100
+    batches = 10
+    batch_size = 10
+    training_data_len = len(training_data)
 
+## TODO rewrite for new data taype
 def get_batch():
-    indexes = torch.randint(0, training_data_len, (batch_size,))
-    features, shifted, outputs = [], [], []
-    for index in range(batch_size):
-        sample = training_data[indexes[index]]
-        features.append(sample[0])
-        shifted.append(sample[1][:-1])
-        outputs.append(sample[1][1:])
-    return features, shifted, outputs
-
-def get_batch_new():
     indexes = torch.randint(0, training_data_len, (batch_size,))
     features, outputs = [], []
     for index in range(batch_size):
@@ -264,33 +185,19 @@ def get_batch_new():
         outputs.append(sample[1])
     return features, outputs
 
-for epoch in range(epochs):
-    for batch in range(batches):
-        features, target = get_batch_new()
-        output = model(features)
-        break
-        targets = dictionary.tokenize(target).reshape(-1)
-        loss = criterion(output.reshape(-1, len(dictionary)), targets)
-        print('loss',loss)
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-    words = dictionary.decode(output)
-    print(words)
-
-def do_nothing():
     for epoch in range(epochs):
+        break
         for batch in range(batches):
-            features, shifted, target = get_batch()
-            output = model(features, shifted)
+            features, target = get_batch()
+            output = model(features)
+            print(output)
+            break
             targets = dictionary.tokenize(target).reshape(-1)
             loss = criterion(output.reshape(-1, len(dictionary)), targets)
             print('loss',loss)
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-        words = dictionary.decode(output)
-        print(words)
-#print(words)
-#print(words)
-#print(" ".join(words))
+        #words = dictionary.decode(output)
+        #print(words)
+
