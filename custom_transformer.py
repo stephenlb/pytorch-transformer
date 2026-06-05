@@ -144,6 +144,10 @@ class Dictionary(torch.nn.Module):
             ] for phrases in batches
         ]
         return torch.Tensor(tokens).to(torch.long)
+
+    def one_hot(self, words):
+        tokens = self.tokenize(words)
+        return torch.nn.functional.one_hot(tokens)#.to(torch.float)
         
 class Transformer(torch.nn.Module):
     def __init__(self, dictionary):
@@ -175,6 +179,7 @@ model = Transformer(dictionary)
 model.train()
 optimizer = torch.optim.AdamW(model.parameters(), lr=0.0001)
 criterion = torch.nn.CrossEntropyLoss(ignore_index=0)
+#criterion = torch.nn.NLLLoss(ignore_index=0)
 epochs = 1
 batches = 10
 batch_size = 20
@@ -194,6 +199,7 @@ def batch_prepare():
         training_set['features'].append(segment)
         training_set['labels'].append(target)
 
+## TODO problem with out of range index
 def get_batch():
     indexes = torch.randint(0, training_set['len'], (batch_size,))
     features = [training_set['features'][index] for index in indexes]
@@ -205,11 +211,20 @@ def train():
         for batch in range(batches):
             features, target = get_batch()
             output = model(features)
-            targets = dictionary.tokenize(target).reshape(-1)
-            print(targets)
+            targets = dictionary.one_hot(target)#.reshape(-1)
+            output = output#.reshape(-1, len(dictionary))
+            #targets = dictionary.tokenize(target).reshape(-1)
+            #targets = dictionary.one_hot(targets)
+            print('targets')
+            #print(targets)
+            print(targets.shape)
+            print('output')
+            #print(output)
+            print(output.shape)
+            #loss = criterion(output, targets)
+            #loss = criterion(output.reshape(-1, len(dictionary)), targets)
+            #print('loss',loss)
             break
-            loss = criterion(output.reshape(-1, len(dictionary)), targets)
-            print('loss',loss)
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
