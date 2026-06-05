@@ -29,7 +29,7 @@ class StephenFormer(torch.nn.Module):
         self.query_projection = torch.nn.Linear(dims, dims)
         self.key_projection   = torch.nn.Linear(dims, dims)
         self.value_projection = torch.nn.Linear(dims, dims)
-        self.softmax = torch.nn.Softmax()
+        self.softmax = torch.nn.Softmax(dim=1)
         self.dropout = torch.nn.Dropout(0.1)
 
         ## Feed Forward
@@ -47,6 +47,12 @@ class StephenFormer(torch.nn.Module):
         self.output_projection = torch.nn.Linear(dims, len(dictionary))
 
     def attention(self, query, key, value):
+        print(query.shape)
+        print(query.shape[0])
+        #B = query.shape
+        #query = query.view(B
+        #key = key
+        #value = value
         ## TODO Multi-headed attention
         out = query @ key.transpose(1,2)
         out = out / torch.sqrt(torch.tensor(self.dims))
@@ -97,10 +103,10 @@ class Dictionary(torch.nn.Module):
         ### TODO We are eating the newline chars......
         self.norm = r'#.*$'
         self.dictionary = {
-            #'<pad>' : 0, ## Padding
-            #'<start>' : 1, ## Start of Sequence
-            #'<end>' : 2, ## End of Sequence
-            #'<unknown>' : 3, ## Unknown Token
+            '<pad>' : 0, ## Padding
+            '<start>' : 1, ## Start of Sequence
+            '<end>' : 2, ## End of Sequence
+            '<unknown>' : 3, ## Unknown Token
         }
         union_clip = set(self.dictionary.keys())
         self.vocab = set(self.normalize(corpus)) - union_clip
@@ -165,34 +171,43 @@ training_data = Path(__file__).read_text()
 dictionary = Dictionary(training_data)
 print(dictionary)
 print(dictionary.decoder)
-def nonaksjfask():
-    model = Transformer(dictionary)
-    model.train()
-    optimizer = torch.optim.AdamW(model.parameters(), lr=0.0001)
-    criterion = torch.nn.CrossEntropyLoss(ignore_index=0)
-    epochs = 100
-    batches = 10
-    batch_size = 10
-    training_data_len = len(training_data)
+model = Transformer(dictionary)
+model.train()
+optimizer = torch.optim.AdamW(model.parameters(), lr=0.0001)
+criterion = torch.nn.CrossEntropyLoss(ignore_index=0)
+epochs = 1
+batches = 10
+batch_size = 20
 
-## TODO rewrite for new data taype
+## TODO rewrite for new data type
+training_set = {
+    'features' : [],
+    'labels'   : [],
+    'len'      : len(training_data),
+    'window'   : 20, ## tokens
+}
+def batch_prepare():
+    window = training_set['window']
+    for position in range(training_set['len'] - window - 1):
+        segment = training_data[position:position+window]
+        target = training_data[position+window]
+        training_set['features'].append(segment)
+        training_set['labels'].append(target)
+
 def get_batch():
-    indexes = torch.randint(0, training_data_len, (batch_size,))
-    features, outputs = [], []
-    for index in range(batch_size):
-        sample = training_data[indexes[index]]
-        features.append(sample[0])
-        outputs.append(sample[1])
-    return features, outputs
+    indexes = torch.randint(0, training_set['len'], (batch_size,))
+    features = [training_set['features'][index] for index in indexes]
+    labels = [training_set['labels'][index] for index in indexes]
+    return features, labels
 
+def train():
     for epoch in range(epochs):
-        break
         for batch in range(batches):
             features, target = get_batch()
             output = model(features)
-            print(output)
-            break
             targets = dictionary.tokenize(target).reshape(-1)
+            print(targets)
+            break
             loss = criterion(output.reshape(-1, len(dictionary)), targets)
             print('loss',loss)
             optimizer.zero_grad()
@@ -201,3 +216,6 @@ def get_batch():
         #words = dictionary.decode(output)
         #print(words)
 
+batch_prepare()
+#print(training_set)
+train()
