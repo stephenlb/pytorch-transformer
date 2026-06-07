@@ -1,25 +1,42 @@
 import re
+import random
 import torch
 from pathlib import Path
 
-### TODO Dictionary must tokenize better!!!!
-### TODO Train on this file specificly
-### TODO Finish Batch and Shuffling <--
+### TODO tokenize differently - Problem - a lot of blank space chars
+### TODO Train on Tiny Story dataset
+### TODO More Data ( take pytorch github and copy all py files into 1 big file )
+### TODO Save and Load model
+### TODO Causal Mask
+### TODO Print Loop ( so that it can save the file )
+### TODO Send to GPU Device
+### TODO Fine Tuning
+### TODO Fine Tuning: smaller batches on final
+### TODO Fine Tuning: on final custom_transformer.py
+### TODO ✅ Test the model, see what it is saying
+### TODO ✅ Dictionary must tokenize better!!!!
+### TODO ✅ Train on this file specificly
+### TODO ✅ Finish Batch and Shuffling <--
 ### TODO ✅ POSITIONAL Encoding
+### TODO ✅ We are eating the newline chars......
+### TODO KV Cache - good for inference
+### TODO Training data generator based on our input data file
+### TODO Upgrade Dictionary support better word memroy management
+### TODO data set to learn from
+### TODO      RoPE - for positional encodeing
+### TODO training model.train()
+### TODO question_mask = torch.nn.Transformer.generate_square_subsequent_mask(question_embedding.size(0)) ## TODO size(1) if batching
+### TODO trim start and end between target and training_data[1]
 
 ## Custom Stephen Transformer
 class StephenFormer(torch.nn.Module):
-    ## TODO KV Cache - good for inference
     ## TODO Multi-head
-    ## TODO Attention
-    ## TODO Forward MLP with activation (GELU)
     ## TODO 
-    def __init__(self, dictionary, dims=128, heads=1):
+    def __init__(self, dictionary, dims=256, heads=1):
         super().__init__()
         self.dictionary = dictionary
         self.dims = dims
         self.heads = heads
-        #self.number_of_words = number_of_words = len(dictionary)
 
         ## TODO think about how to use this later
         ## Embedding
@@ -29,7 +46,7 @@ class StephenFormer(torch.nn.Module):
         self.query_projection = torch.nn.Linear(dims, dims)
         self.key_projection   = torch.nn.Linear(dims, dims)
         self.value_projection = torch.nn.Linear(dims, dims)
-        self.softmax = torch.nn.Softmax(dim=1)
+        self.softmax = torch.nn.Softmax(dim=-1)
         self.dropout = torch.nn.Dropout(0.1)
 
         ## Feed Forward
@@ -41,21 +58,22 @@ class StephenFormer(torch.nn.Module):
         )
 
         ## Layer Norm and Add
-        self.norm = torch.nn.LayerNorm(dims)
+        self.norm1 = torch.nn.LayerNorm(dims)
+        self.norm2 = torch.nn.LayerNorm(dims)
 
         ## Output Projection
         self.output_projection = torch.nn.Linear(dims, len(dictionary))
 
     def attention(self, query, key, value):
         ## TODO Multi-headed attention
+        batch, seq, _ = query.shape
         out = query @ key.transpose(1,2)
         out = out / torch.sqrt(torch.tensor(self.dims))
-        #out = torch.softmax(out, dim=-1)
+        mask = torch.nn.Transformer.generate_square_subsequent_mask(seq, device=out.device)
+        out = out + mask
         out = self.softmax(out)
         out = self.dropout(out)
         out = out @ value
-        print('attention')
-        print(out.shape)
         return out
 
     def forward(self, inputs):
@@ -64,29 +82,13 @@ class StephenFormer(torch.nn.Module):
         query = self.query_projection(inputs)
         key   = self.key_projection(inputs)
         value = self.value_projection(inputs)
-        out = self.attention(query, key, value)
-        print('forward')
-        print(out.shape)
-        out = self.norm(inputs + out)
-        print(out.shape)
-        out = self.feedforward(out)
-        print(out.shape)
-        out = self.norm(inputs + out)
-        print(out.shape)
+        attn = self.attention(query, key, value)
+        out = self.norm1(inputs + attn)
+        out = self.norm2(out + self.feedforward(out))
         out = self.output_projection(out)
-        print(out.shape)
         return out
 
-
-## TODO Training data generator based on our input data file
-## TODO Upgrade Dictionary support better word memroy management
-## TODO data set to learn from
-## TODO      RoPE - for positional encodeing
-## TODO training model.train()
-## TODO question_mask = torch.nn.Transformer.generate_square_subsequent_mask(question_embedding.size(0)) ## TODO size(1) if batching
-## TODO trim start and end between target and training_data[1]
-
-class PositionalEncoding(torch.nn.Module):
+class PositionalEncodingSin(torch.nn.Module):
     def __init__(self, dims, max_tokens=5000):
         super().__init__()
         pe = []
@@ -97,19 +99,26 @@ class PositionalEncoding(torch.nn.Module):
         self.register_buffer("pe", pe)
 
     def forward(self, x):
-	### 32,20, hidden
-        return x + self.pe[:x.shape[0],:].unsqueeze(0)
+        return x + self.pe[:x.shape[1],:].unsqueeze(0)
+
+class PositionalEncoding(torch.nn.Module):
+    def __init__(self, dims, max_tokens=5000):
+        super().__init__()
+        self.embedding = torch.nn.Embedding(max_tokens, dims)
+
+    def forward(self, x):
+        positions = torch.arange(x.shape[1], device=x.device)
+        return x + self.embedding(positions).unsqueeze(0)
 
 class Dictionary(torch.nn.Module):
     def __init__(self, corpus):
         super().__init__()
-        ### TODO We are eating the newline chars......
         self.norm = r'#.*$'
         self.dictionary = {
-            '<pad>' : 0, ## Padding
-            '<start>' : 1, ## Start of Sequence
-            '<end>' : 2, ## End of Sequence
-            '<unknown>' : 3, ## Unknown Token
+            #'<pad>' : 0, ## Padding
+            #'<start>' : 1, ## Start of Sequence
+            #'<end>' : 2, ## End of Sequence
+            #'<unknown>' : 3, ## Unknown Token
         }
         union_clip = set(self.dictionary.keys())
         self.vocab = set(self.normalize(corpus)) - union_clip
@@ -166,7 +175,8 @@ class Transformer(torch.nn.Module):
         #self.soft = torch.nn.Softmax()
 
     def forward(self, inputs):
-        tokens = self.dictionary.tokenize(inputs)
+        device = next(self.parameters()).device
+        tokens = self.dictionary.tokenize(inputs).to(device)
         embeddings = self.embedding(tokens)
         pos_encoded = self.positional(embeddings)
         ## TODO mult-pass
@@ -179,20 +189,21 @@ training_data = Path(__file__).read_text()
 dictionary = Dictionary(training_data)
 print(dictionary)
 print(dictionary.decoder)
-model = Transformer(dictionary)
+device = 'cpu'#torch.accelerator.current_accelerator()
+model = Transformer(dictionary).to(device)
 model.train()
-optimizer = torch.optim.AdamW(model.parameters(), lr=0.0001)
+optimizer = torch.optim.AdamW(model.parameters(), lr=0.0003)
 criterion = torch.nn.CrossEntropyLoss(ignore_index=0)
 #criterion = torch.nn.NLLLoss(ignore_index=0)
-epochs = 1
-batch_size = 32
+epochs = 100000
+batch_size = 256
 
 ## TODO rewrite for new data type
 training_set = {
     'features' : [],
     'labels'   : [],
     'len'      : len(training_data),
-    'window'   : 20, ## tokens
+    'window'   : 32, ## tokens
 }
 ## TODO Problem - convert to a window target, not just one value
 def batch_prepare():
@@ -221,29 +232,54 @@ def get_batch():
         yield features, labels
 
 def train():
+    loss = 100
     for epoch in range(epochs):
         for features, targets in get_batch():
             output = model(features)
-            output = output#.reshape(-1, len(dictionary))
-            #targets = dictionary.tokenize(targets).unsqueeze(2)#[:,:,None]#.reshape(-1)
-            targets = dictionary.one_hot(targets)#.unsqueeze(2)#[:,:,None]#.reshape(-1)
-            print(targets)
-            print('targets')
-            #print(targets)
-            print(targets.shape)
-            print('output')
-            #print(output)
-            print(output.shape)
-            loss = criterion(output, targets)
-            #loss = criterion(output.reshape(-1, len(dictionary)), targets)
-            print('loss',loss.item())
-            break
+            targets = dictionary.tokenize(targets).to(device)
+            loss = criterion(output.transpose(1, 2), targets)
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-        #words = dictionary.decode(output)
+        print('loss',loss.item())
+        #words = [''.join(sentence) for sentence in dictionary.decode(output)]
         #print(words)
+        model.eval()
+        predict()
+        model.train()
+
+## accuracy test
+def predict():
+    out_len = 200
+    window = training_set['window']
+    start = random.randint(0, len(training_data) - window - out_len - 1)
+    inputs = training_data[start : start + window]
+    print(inputs, end="", flush=True)
+    for i in range(out_len):
+        out = model([inputs])
+        last_token = dictionary.decode(out)[0][-1]
+        #print(words)
+        print(last_token, end="", flush=True)
+        #print(start)
+        inputs = inputs[1:] + last_token
+    print('')
+
+
 
 batch_prepare()
 #print(training_set)
-train()
+try:
+    model.load_state_dict(torch.load('gpt.pth'))
+except Exception as e:
+    print('FAILE TO LOAD')
+    print('FAILE TO LOAD')
+    print('FAILE TO LOAD')
+    print('FAILE TO LOAD')
+    pass
+try:
+    train()
+except KeyboardInterrupt:
+    torch.save(model.state_dict(), 'gpt.pth')
+    
+torch.save(model.state_dict(), 'gpt.pth')
+predict()
