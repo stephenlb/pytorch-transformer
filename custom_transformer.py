@@ -1,18 +1,27 @@
 import re
-import random
+import time
 import torch
+import random
 from pathlib import Path
 
-### TODO tokenize differently - Problem - a lot of blank space chars
-### TODO Train on Tiny Story dataset
 ### TODO More Data ( take pytorch github and copy all py files into 1 big file )
-### TODO Save and Load model
-### TODO Causal Mask
-### TODO Print Loop ( so that it can save the file )
-### TODO Send to GPU Device
+### TODO Visualize the model
+### TODO Parameter Golf from OpenAI - I want to read the placeholder code
+### TODO Positional Encoding Rotary attention
+### TODO tokenize differently - Problem - a lot of blank space chars
+### TODO Multi-head attn
+### TODO Multiple Transformer Layers
+### TODO Performance improvemnts KV cache / singlek projection QKV
+### TODO Temperature on predition
+### TODO Train on Tiny Story dataset
 ### TODO Fine Tuning
 ### TODO Fine Tuning: smaller batches on final
 ### TODO Fine Tuning: on final custom_transformer.py
+### TODO ✅ Save and Load model
+### TODO ✅ Causal Mask
+### TODO ✅ Print Loop ( so that it can save the file )
+### TODO ✅ Send to GPU Device
+### TODO ✅ Print more
 ### TODO ✅ Test the model, see what it is saying
 ### TODO ✅ Dictionary must tokenize better!!!!
 ### TODO ✅ Train on this file specificly
@@ -22,8 +31,6 @@ from pathlib import Path
 ### TODO KV Cache - good for inference
 ### TODO Training data generator based on our input data file
 ### TODO Upgrade Dictionary support better word memroy management
-### TODO data set to learn from
-### TODO      RoPE - for positional encodeing
 ### TODO training model.train()
 ### TODO question_mask = torch.nn.Transformer.generate_square_subsequent_mask(question_embedding.size(0)) ## TODO size(1) if batching
 ### TODO trim start and end between target and training_data[1]
@@ -32,7 +39,7 @@ from pathlib import Path
 class StephenFormer(torch.nn.Module):
     ## TODO Multi-head
     ## TODO 
-    def __init__(self, dictionary, dims=256, heads=1):
+    def __init__(self, dictionary, dims=256, heads=4):
         super().__init__()
         self.dictionary = dictionary
         self.dims = dims
@@ -65,16 +72,27 @@ class StephenFormer(torch.nn.Module):
         self.output_projection = torch.nn.Linear(dims, len(dictionary))
 
     def attention(self, query, key, value):
-        ## TODO Multi-headed attention
         batch, seq, _ = query.shape
-        out = query @ key.transpose(1,2)
+
+        ## Multi-headed attention
+        heads = self.heads
+        dims = self.dims
+        assert self.dims % heads == 0
+        h_dims = self.dims // heads
+
+        query = query.view(batch, seq, heads, h_dims).transpose(1, 2)
+        key = key.view(batch, seq, heads, h_dims).transpose(1, 2)
+        value = value.view(batch, seq, heads, h_dims).transpose(1, 2)
+
+        out = query @ key.transpose(-2, -1)
         out = out / torch.sqrt(torch.tensor(self.dims))
         mask = torch.nn.Transformer.generate_square_subsequent_mask(seq, device=out.device)
         out = out + mask
         out = self.softmax(out)
         out = self.dropout(out)
         out = out @ value
-        return out
+
+        return out.transpose(1, 2).contiguous().view(batch, seq, dims)
 
     def forward(self, inputs):
         ## TODO @Cloudhead- use a single projection x 3 for faster better
@@ -121,7 +139,7 @@ class Dictionary(torch.nn.Module):
             #'<unknown>' : 3, ## Unknown Token
         }
         union_clip = set(self.dictionary.keys())
-        self.vocab = set(self.normalize(corpus)) - union_clip
+        self.vocab = sorted(set(self.normalize(corpus)) - union_clip)
         self.dictionary.update({
             word : index + len(self.dictionary)
             for index, word in enumerate(self.vocab)
@@ -163,10 +181,10 @@ class Dictionary(torch.nn.Module):
 
         
 class Transformer(torch.nn.Module):
-    def __init__(self, dictionary):
+    def __init__(self, dictionary, dims=256):
         super().__init__()
         self.dictionary = dictionary
-        self.dims = dims = 128
+        self.dims = dims
         self.number_of_words = number_of_words = len(dictionary)
         self.embedding = torch.nn.Embedding(number_of_words, dims)
         self.positional = PositionalEncoding(dims)
@@ -184,19 +202,21 @@ class Transformer(torch.nn.Module):
         return out
 
 ## Read self so we can learn self, and replicate
-training_data = Path(__file__).read_text()
-#training_data = generate_math()
+fine_tuning = Path(__file__).read_text()
+pytorch_examples = Path('pytorch-training.py').read_text()
+gpt_golf = Path('golf.py').read_text()
+training_data = fine_tuning + pytorch_examples + gpt_golf
 dictionary = Dictionary(training_data)
-print(dictionary)
-print(dictionary.decoder)
-device = 'cpu'#torch.accelerator.current_accelerator()
+#print(dictionary)
+#print(dictionary.decoder)
+device = torch.accelerator.current_accelerator()
 model = Transformer(dictionary).to(device)
 model.train()
 optimizer = torch.optim.AdamW(model.parameters(), lr=0.0003)
 criterion = torch.nn.CrossEntropyLoss(ignore_index=0)
 #criterion = torch.nn.NLLLoss(ignore_index=0)
 epochs = 100000
-batch_size = 256
+batch_size = 512
 
 ## TODO rewrite for new data type
 training_set = {
@@ -232,25 +252,34 @@ def get_batch():
         yield features, labels
 
 def train():
-    loss = 100
+    loss = 100 
     for epoch in range(epochs):
+        tokens = 0 # tokens per second
+        start = time.time()
         for features, targets in get_batch():
+            tokens += sum([len(sentence) for sentence in features])
             output = model(features)
             targets = dictionary.tokenize(targets).to(device)
             loss = criterion(output.transpose(1, 2), targets)
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-        print('loss',loss.item())
-        #words = [''.join(sentence) for sentence in dictionary.decode(output)]
-        #print(words)
+
+        duration = time.time() - start
+
+        print()
+        print('tokens trained:', f'{tokens:,}')
+        print('tokens per second:', f'{tokens//duration:,}')
+        print('epoch loss:', f'{loss.item():.4f}')
+        print('epoch duration:', f'{duration:.2f} seconds' )
+
         model.eval()
         predict()
         model.train()
 
 ## accuracy test
 def predict():
-    out_len = 200
+    out_len = 100
     window = training_set['window']
     start = random.randint(0, len(training_data) - window - out_len - 1)
     inputs = training_data[start : start + window]
@@ -272,10 +301,6 @@ try:
     model.load_state_dict(torch.load('gpt.pth'))
 except Exception as e:
     print('FAILE TO LOAD')
-    print('FAILE TO LOAD')
-    print('FAILE TO LOAD')
-    print('FAILE TO LOAD')
-    pass
 try:
     train()
 except KeyboardInterrupt:
