@@ -4,14 +4,17 @@ import torch
 import random
 from pathlib import Path
 
-### TODO More Data ( take pytorch github and copy all py files into 1 big file )
+### TODO ✅ @Cloudhead- use a single projection x 3 for faster better
+### TODO ✅ Single projection QKV 
 ### TODO Visualize the model
-### TODO Parameter Golf from OpenAI - I want to read the placeholder code
+### TODO Zabian says Train on Wiki
 ### TODO Positional Encoding Rotary attention
 ### TODO tokenize differently - Problem - a lot of blank space chars
-### TODO Multi-head attn
 ### TODO Multiple Transformer Layers
-### TODO Performance improvemnts KV cache / singlek projection QKV
+### TODO Performance improvemnts KV cache / 
+### TODO ✅ More Data ( take pytorch github and copy all py files into 1 big file )
+### TODO ✅ Parameter Golf from OpenAI - I want to read the placeholder code
+### TODO ✅ Multi-head attn
 ### TODO Temperature on predition
 ### TODO Train on Tiny Story dataset
 ### TODO Fine Tuning
@@ -28,12 +31,11 @@ from pathlib import Path
 ### TODO ✅ Finish Batch and Shuffling <--
 ### TODO ✅ POSITIONAL Encoding
 ### TODO ✅ We are eating the newline chars......
-### TODO KV Cache - good for inference
-### TODO Training data generator based on our input data file
+### TODO ✅ Training data generator based on our input data file
 ### TODO Upgrade Dictionary support better word memroy management
-### TODO training model.train()
-### TODO question_mask = torch.nn.Transformer.generate_square_subsequent_mask(question_embedding.size(0)) ## TODO size(1) if batching
-### TODO trim start and end between target and training_data[1]
+### TODO ✅ training model.train()
+### TODO ✅ question_mask = torch.nn.Transformer.generate_square_subsequent_mask(question_embedding.size(0)) ## TODO size(1) if batching
+### TODO ✅ trim start and end between target and training_data[1]
 
 ## Custom Stephen Transformer
 class StephenFormer(torch.nn.Module):
@@ -50,9 +52,7 @@ class StephenFormer(torch.nn.Module):
         #self.embedding = torch.rand(self.number_of_words, dims, requires_grad=True) - 0.5
 
         ## Self Attention
-        self.query_projection = torch.nn.Linear(dims, dims)
-        self.key_projection   = torch.nn.Linear(dims, dims)
-        self.value_projection = torch.nn.Linear(dims, dims)
+        self.qkv_projection = torch.nn.Linear(dims, dims * 3)
         self.softmax = torch.nn.Softmax(dim=-1)
         self.dropout = torch.nn.Dropout(0.1)
 
@@ -95,11 +95,8 @@ class StephenFormer(torch.nn.Module):
         return out.transpose(1, 2).reshape(batch, seq, dims)
 
     def forward(self, inputs):
-        ## TODO @Cloudhead- use a single projection x 3 for faster better
-        ##  Q,K,V=self.qkv(input).chunk(3,dim=-1)
-        query = self.query_projection(inputs)
-        key   = self.key_projection(inputs)
-        value = self.value_projection(inputs)
+        out = self.qkv_projection(inputs)
+        query, key, value = out.chunk(3, dim=-1)
         attn = self.attention(query, key, value)
         out = self.norm1(inputs + attn)
         out = self.norm2(out + self.feedforward(out))
