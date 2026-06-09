@@ -92,7 +92,7 @@ class StephenFormer(torch.nn.Module):
         out = self.dropout(out)
         out = out @ value
 
-        return out.transpose(1, 2).contiguous().view(batch, seq, dims)
+        return out.transpose(1, 2).reshape(batch, seq, dims)
 
     def forward(self, inputs):
         ## TODO @Cloudhead- use a single projection x 3 for faster better
@@ -253,9 +253,9 @@ def get_batch():
 
 def train():
     loss = 100 
+    tokens = 0 # tokens per second
+    start = time.time()
     for epoch in range(epochs):
-        tokens = 0 # tokens per second
-        start = time.time()
         for features, targets in get_batch():
             tokens += sum([len(sentence) for sentence in features])
             output = model(features)
@@ -270,8 +270,8 @@ def train():
         print()
         print('tokens trained:', f'{tokens:,}')
         print('tokens per second:', f'{tokens//duration:,}')
+        print('run time:', f'{duration:.2f} seconds' )
         print('epoch loss:', f'{loss.item():.4f}')
-        print('epoch duration:', f'{duration:.2f} seconds' )
 
         model.eval()
         predict()
