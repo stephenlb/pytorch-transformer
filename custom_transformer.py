@@ -4,18 +4,18 @@ import torch
 import random
 from pathlib import Path
 
+### TODO Top-K Temperature on prediction outputs
+### TODO Multiple Transformer Layers
 ### TODO ✅ @Cloudhead- use a single projection x 3 for faster better
 ### TODO ✅ Single projection QKV 
 ### TODO Visualize the model
 ### TODO Zabian says Train on Wiki
 ### TODO Positional Encoding Rotary attention
 ### TODO tokenize differently - Problem - a lot of blank space chars
-### TODO Multiple Transformer Layers
 ### TODO Performance improvemnts KV cache / 
 ### TODO ✅ More Data ( take pytorch github and copy all py files into 1 big file )
 ### TODO ✅ Parameter Golf from OpenAI - I want to read the placeholder code
 ### TODO ✅ Multi-head attn
-### TODO Temperature on predition
 ### TODO Train on Tiny Story dataset
 ### TODO Fine Tuning
 ### TODO Fine Tuning: smaller batches on final
@@ -46,6 +46,9 @@ class StephenFormer(torch.nn.Module):
         self.dictionary = dictionary
         self.dims = dims
         self.heads = heads
+        assert dims % heads == 0
+        self.h_dims = dims // heads
+        self.scale = self.h_dims ** 0.5
 
         ## TODO think about how to use this later
         ## Embedding
@@ -67,6 +70,7 @@ class StephenFormer(torch.nn.Module):
         ## Layer Norm and Add
         self.norm1 = torch.nn.LayerNorm(dims)
         self.norm2 = torch.nn.LayerNorm(dims)
+        self.norm3 = torch.nn.LayerNorm(dims)
 
         ## Output Projection
         self.output_projection = torch.nn.Linear(dims, len(dictionary))
@@ -77,15 +81,14 @@ class StephenFormer(torch.nn.Module):
         ## Multi-headed attention
         heads = self.heads
         dims = self.dims
-        assert self.dims % heads == 0
-        h_dims = self.dims // heads
+        h_dims = self.h_dims
 
         query = query.view(batch, seq, heads, h_dims).transpose(1, 2)
         key = key.view(batch, seq, heads, h_dims).transpose(1, 2)
         value = value.view(batch, seq, heads, h_dims).transpose(1, 2)
 
         out = query @ key.transpose(-2, -1)
-        out = out / torch.sqrt(torch.tensor(self.dims))
+        out = out / self.scale
         mask = torch.nn.Transformer.generate_square_subsequent_mask(seq, device=out.device)
         out = out + mask
         out = self.softmax(out)
@@ -95,11 +98,12 @@ class StephenFormer(torch.nn.Module):
         return out.transpose(1, 2).reshape(batch, seq, dims)
 
     def forward(self, inputs):
-        out = self.qkv_projection(inputs)
+        out = self.norm1(inputs)
+        out = self.qkv_projection(out)
         query, key, value = out.chunk(3, dim=-1)
         attn = self.attention(query, key, value)
-        out = self.norm1(inputs + attn)
-        out = self.norm2(out + self.feedforward(out))
+        out = self.norm2(inputs + attn)
+        out = self.norm3(out + self.feedforward(out))
         out = self.output_projection(out)
         return out
 
@@ -125,12 +129,15 @@ class PositionalEncoding(torch.nn.Module):
         positions = torch.arange(x.shape[1], device=x.device)
         return x + self.embedding(positions).unsqueeze(0)
 
+## actually our Tokenizer
+## Cat -> 12
+## Cat <- 12
 class Dictionary(torch.nn.Module):
     def __init__(self, corpus):
         super().__init__()
         self.norm = r'#.*$'
         self.dictionary = {
-            #'<pad>' : 0, ## Padding
+            '<pad>' : 0, ## Padding
             #'<start>' : 1, ## Start of Sequence
             #'<end>' : 2, ## End of Sequence
             #'<unknown>' : 3, ## Unknown Token
@@ -152,11 +159,22 @@ class Dictionary(torch.nn.Module):
     def __repr__(self):
         return str(self.dictionary)
 
-    def decode(self, outputs):
+    def decode(self, outputs, temperature=0.7):
+        ## Neva asked to implement this check temp == 0 and use argmax
+        if temperature == 0:
+            batch = []
+            for output in outputs:
+                tokens = torch.argmax(output, dim=-1)
+                batch.append([self.decoder[token.item()] for token in tokens])
+            return batch
+            
         batch = []
-        for output in outputs:
-            tokens = torch.argmax(output, dim=1)
-            batch.append([self.decoder[token.item()] for token in tokens])
+        B, S, V = outputs.shape
+        out = (outputs / temperature).softmax(-1)
+        out = out.view(-1, V)
+        tokens = out.multinomial(1)
+        tokens = tokens.view(B, S, 1)
+        batch = [[self.decoder[token[0].item()] for token in seq] for seq in tokens]
         return batch
 
     def normalize(self, words):
@@ -275,19 +293,23 @@ def train():
         model.train()
 
 ## accuracy test
+@torch.no_grad()
 def predict():
     out_len = 100
     window = training_set['window']
     start = random.randint(0, len(training_data) - window - out_len - 1)
     inputs = training_data[start : start + window]
+    print('-' * 78)
     print(inputs, end="", flush=True)
     for i in range(out_len):
         out = model([inputs])
+        ## Greedy token selection
         last_token = dictionary.decode(out)[0][-1]
         #print(words)
         print(last_token, end="", flush=True)
         #print(start)
         inputs = inputs[1:] + last_token
+    print('-' * 78)
     print('')
 
 
