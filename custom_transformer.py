@@ -4,7 +4,7 @@ import torch
 import random
 from pathlib import Path
 
-### TODO Top-K Temperature on prediction outputs
+### TODO ✅ Top-K Temperature on prediction outputs
 ### TODO Multiple Transformer Layers
 ### TODO ✅ @Cloudhead- use a single projection x 3 for faster better
 ### TODO ✅ Single projection QKV 
@@ -37,10 +37,8 @@ from pathlib import Path
 ### TODO ✅ question_mask = torch.nn.Transformer.generate_square_subsequent_mask(question_embedding.size(0)) ## TODO size(1) if batching
 ### TODO ✅ trim start and end between target and training_data[1]
 
-## Custom Stephen Transformer
-class StephenFormer(torch.nn.Module):
-    ## TODO Multi-head
-    ## TODO 
+## Custom Stephen Transformer (Block)
+class StephenGBT(torch.nn.Module):
     def __init__(self, dictionary, dims=256, heads=4):
         super().__init__()
         self.dictionary = dictionary
@@ -49,10 +47,6 @@ class StephenFormer(torch.nn.Module):
         assert dims % heads == 0
         self.h_dims = dims // heads
         self.scale = self.h_dims ** 0.5
-
-        ## TODO think about how to use this later
-        ## Embedding
-        #self.embedding = torch.rand(self.number_of_words, dims, requires_grad=True) - 0.5
 
         ## Self Attention
         self.qkv_projection = torch.nn.Linear(dims, dims * 3)
@@ -71,9 +65,6 @@ class StephenFormer(torch.nn.Module):
         self.norm1 = torch.nn.LayerNorm(dims)
         self.norm2 = torch.nn.LayerNorm(dims)
         self.norm3 = torch.nn.LayerNorm(dims)
-
-        ## Output Projection
-        self.output_projection = torch.nn.Linear(dims, len(dictionary))
 
     def attention(self, query, key, value):
         batch, seq, _ = query.shape
@@ -104,7 +95,6 @@ class StephenFormer(torch.nn.Module):
         attn = self.attention(query, key, value)
         out = self.norm2(inputs + attn)
         out = self.norm3(out + self.feedforward(out))
-        out = self.output_projection(out)
         return out
 
 class PositionalEncodingSin(torch.nn.Module):
@@ -194,7 +184,6 @@ class Dictionary(torch.nn.Module):
         tokens = self.tokenize(words)
         return torch.nn.functional.one_hot(tokens).to(torch.float)
 
-        
 class Transformer(torch.nn.Module):
     def __init__(self, dictionary, dims=256):
         super().__init__()
@@ -203,17 +192,28 @@ class Transformer(torch.nn.Module):
         self.number_of_words = number_of_words = len(dictionary)
         self.embedding = torch.nn.Embedding(number_of_words, dims)
         self.positional = PositionalEncoding(dims)
-        self.stephen_transformer = StephenFormer(dictionary, dims=dims)
-        #self.linear = torch.nn.Linear(dims, len(dictionary))
-        #self.soft = torch.nn.Softmax()
+
+        ## TODO multiple blocks (Use torch multmodule)
+        self.stephengbt = torch.nn.Sequential(
+            StephenGBT(dictionary, dims=dims),
+            StephenGBT(dictionary, dims=dims),
+            StephenGBT(dictionary, dims=dims),
+        )
+
+        ## Output Projection
+        self.output_projection = torch.nn.Linear(dims, len(dictionary))
 
     def forward(self, inputs):
         device = next(self.parameters()).device
         tokens = self.dictionary.tokenize(inputs).to(device)
         embeddings = self.embedding(tokens)
         pos_encoded = self.positional(embeddings)
+
         ## TODO mult-pass
-        out = self.stephen_transformer(pos_encoded)
+        out = self.stephengbt(pos_encoded)
+
+        ## Logits
+        out = self.output_projection(out)
         return out
 
 ## Read self so we can learn self, and replicate
